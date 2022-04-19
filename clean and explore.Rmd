@@ -1,0 +1,321 @@
+---
+title: "ISBD Applied Statistics 2022Spring Project Proposal 01"
+author: "xuziya"
+date: "2022/3/14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+With the gradual marketization of China's housing market, the prosperity of the housing industry has promoted the development of the social economy, but it has also led to a series of problems such as the rapid rise in housing prices, and the residential housing consumption has shown an unbalanced development trend.
+
+Regarding the influencing factors of residents' housing demand, a large number of domestic and foreign literatures have been studied, mainly from the perspective of macroeconomic characteristics and residents' personal economic characteristics.The macro factors mainly include housing prices, bank interest rates, urban population and number of households, economic development level and the government's housing policy by zhang(1998). At the micro level, factors such as the personal income or family income of residents, the age structure of the family, the age of the head of the household, the level of education, and the population of the family are often considered.[1]
+
+We hope to explore the causal effects of micro-level factors on housing demand, and, further, estimate the causal effects of multiple treantments. The main challenge is the presence of confounding factors.
+
+### Data Source
+
+The China Family Panel Studies (CFPS) aims to reflect the changes in China's society, economy, population, education and health by tracking and collecting data at three levels: individual, family and community, providing academic research and public policy analysis. 
+
+CFPS is implemented by the Chinese Social Science Survey Center (ISSS) of Peking University. The CFPS sample covers 25 provinces/municipalities/autonomous regions, with a target sample size of 16,000 households. The survey objects include all family members of the sample households. The interview was officially launched in 2010. This project select the cross-sectional data on family relations and family economy in 2018.
+
+
+
+## Data Description
+
+We load the following packages and the CFPS partial data.
+```{r,echo=FALSE,warning=FALSE}
+# load libraries
+library(tidyverse)
+library(haven)
+library(dplyr)
+library(visdat)
+library(ggplot2)
+library(ggpubr)
+
+# read original data
+prefix <- "e:/rmu_study/project/mv2STH_PROJ/data/"
+
+cfps_famconf <- read_dta(paste0(prefix, "ecfps2018famconf_202008.dta"))
+cfps_famecon <- read_dta(paste0(prefix, "ecfps2018famecon_202101.dta"))
+
+```
+
+A first view of the dataset:    
+```{r}
+unlist_label_famconf <- lapply(cfps_famconf, function(x) attr(x, "label")) 
+head(unlist_label_famconf)
+tail(unlist_label_famconf)
+unlist_label_famecon <- lapply(cfps_famecon, function(x) attr(x, "label"))
+tail(unlist_label_famecon,10)
+
+#Design=svydesign(ids=~psu,strata=~subpopulation,data=cfps_famecon,weight=~ fswt_natcs18n) 
+## needs library(survey) and overwrite function like, mean=svymean(~bianliangming,Design)
+table(cfps_famconf$subsample)
+table(cfps_famecon$subsample)
+
+```
+To avoid using weight, we select the subsampling data.
+```{r}
+cfps_famconf <- filter(cfps_famconf,subsample==1)
+cfps_famecon <- filter(cfps_famecon,subsample==1)
+dim(cfps_famconf)
+dim(cfps_famecon)
+length(unique(cfps_famconf$fid18))
+length(unique(cfps_famecon$fid18))
+```
+
+
+
+
+### Data Preprocessing
+
+First look at the meaning of negative values.
+```{r}
+attr(cfps_famecon$urban18,"labels")
+
+```
+Then we choose urban family as our object and select the variables relevant to our reasearch.
+
+```{r}
+# subset urban families
+cfps_famecon_urban <- cfps_famecon[cfps_famecon$urban18 == 1,]
+
+# select columns that are relevant to this research
+df_family <- cfps_famecon_urban[,c('fid18','provcd18','countyid18', 'cid18','urban18','fml_count', #location
+                            'fq2','fr1',  # house indicator
+                            'familysize18', 
+                            'total_asset', 'finance_asset', 'ft1', 'ft201', 'ft901', # risky financial asset
+                            'ft501', 'ft601','ft602', # informal debt
+                            'fp514', # commercial insurance
+                            'finc','finc1','fincome1','fincome1_per', # total income
+                            'fwage_2', 'foperate_2', 'fproperty_2', # income of different categories
+                            'fq6', 'fa3','fa5', 'fp301','fp401','fp405','fp406','fp407', 'fp501', 
+                            'fp502','fp503','fp505', 'fp509', 'fp512','fp513','fp518', 'fs6v','fs8',
+                            'fu101','fu201', 'daily','dress','eec','food','eptran',  'durables_asset','resp1pid')]                                        # outcome etc.
+lapply(df_family, function(x) attr(x, "label")) %>% tail(10)
+
+ncol(df_family)
+df_family %>% select(starts_with("fp"),starts_with("ft"), starts_with("fi"),starts_with("fu"),ends_with("d18"),ends_with("asset")) %>% vis_dat()
+df_family[df_family <0] <- NA 
+df_family %>% select(starts_with("fp"),starts_with("ft"), starts_with("fi"),starts_with("fu"),ends_with("d18"),ends_with("asset")) %>% vis_dat()
+
+##delete the variables with too many na.
+df_family <- select(df_family,-c(starts_with("ft"),finc1,fu101)) 
+```
+Add some variables from cpfs_famconf.
+```{r}
+# get indicator of whether or not there is children less than 18 years old for each family 
+df_family$children_less18 <- unlist(sapply(df_family$fid18, function(x) {
+  tmp_df <- cfps_famconf[cfps_famconf$fid18 == x, ]
+  if (nrow(tmp_df) > 0) {
+    ifelse (max(tmp_df$tb1y_a_p) >= (2018 - 18), #tb1y_a_p:"Date of birth (year)"
+            TRUE,
+            FALSE)
+  } else {
+    NA
+  }
+}))
+
+# keep the Respondent of family's economy has information in cfps_famconf
+length(df_family$resp1pid)                    # "Respondent of family's economic conditions section"
+sum(df_family$resp1pid %in% cfps_famconf$pid)  # pid:"Personal ID"
+df_family <- df_family[df_family$resp1pid %in% cfps_famconf$pid,]
+
+# add the information of the Respondent of family's economy
+cfps_famconf_temp <- cfps_famconf[,c("pid","tb1y_a_p","tb2_a_p","tb3_a18_p","tb4_a18_p","hukou_a18_p","tb4_a18_f","tb4_a18_m","tb4_a18_s")] %>% rename(resp1pid=pid)
+df_family <- merge(df_family,cfps_famconf_temp,by="resp1pid")
+```
+
+We construct a binary variable to show that a family owned or rent a house. 
+```{r}
+# subset the dataset to only those families that have needs to purchase/rent houses
+df_family <- df_family[df_family$fq2 %in% c(1,2,4,5,6),]  #1,2:owned, 4/5/6:rent
+# generate the binary Y variable: whether or not owned the house
+df_family$purchase_house <- ifelse(df_family$fq2 %in% c(1,2), TRUE, FALSE)
+
+
+# show a list of column labels
+unlist_label_df <- lapply(df_family, function(x) attr(x, "label")) %>% glimpse()
+
+# Show sample size
+nrow(df_family)
+```
+
+## Exploratory Data Analysis
+
+### how income factor influnces purchasing house
+
+We first choose three income related variables. Annual household income, household net income, per capita household income.
+```{r,warn.conflicts = FALSE}
+# show the distribution of purchasing/renting houses
+attr(df_family$finc,"label")
+attr(df_family$fincome1,"label")
+attr(df_family$fincome1_per,"label")
+ 
+
+
+qq <- quantile(as.integer(df_family$finc), seq(0, 1, 0.25), na.rm = TRUE)
+df_family<- mutate(df_family, yIncome.quint = cut(as.integer(finc), qq))
+
+qq2 <- quantile(as.numeric(df_family$fincome1_per), seq(0, 1, 0.25), na.rm = TRUE)
+df_family<- mutate(df_family, perNIncome.quint = cut(as.numeric(fincome1_per), qq2))
+
+qq3 <- quantile(as.numeric(df_family$fincome1), seq(0, 1, 0.25), na.rm = TRUE)
+df_family<- mutate(df_family, NIncome.quint = cut(as.numeric(fincome1), qq3))
+
+
+
+df_family %>%    group_by(yIncome.quint) %>% summarize(purchase_rate = mean(purchase_house),count=n(),na.rm = TRUE)
+ggplot(df_family, aes(x = purchase_house, fill = yIncome.quint)) + 
+  geom_bar() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold")) + 
+  ggtitle("Family's total income influnces purchasing or renting")
+
+df_family %>%    group_by(NIncome.quint) %>% summarize(purchase_rate = mean(purchase_house),count=n(),na.rm = TRUE)
+ggplot(df_family, aes(x = purchase_house, fill = NIncome.quint)) + 
+  geom_bar() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold")) + 
+  ggtitle("Family's net income influnces purchasing or renting")
+
+
+df_family %>%    group_by(perNIncome.quint) %>% summarize(purchase_rate = mean(purchase_house),count=n(),na.rm = TRUE)
+ggplot(df_family, aes(x = purchase_house, fill = perNIncome.quint)) + 
+  geom_bar() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold")) +
+  ggtitle("Net income per capita influnces purchasing or renting")
+
+```
+
+Lowest and highest totalincome groups have higher rates of home purchases. However, the higher net income, the higher purchasing rate, while the opposite case holds for net income per capita. The reason for this is the family size. To further check this we consider how net income influnce purchasing house for each group of net income per capita and we draw a box plot(left).As there are too many outliers, we zoom in this box plot(right).
+```{r}
+p1<- ggplot(df_family, aes(x = purchase_house, y = as.numeric(fincome1),fill=perNIncome.quint))  + 
+  geom_boxplot(alpha = 0.8) +
+  scale_y_continuous(name = "net income") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold")) + 
+  facet_wrap(~perNIncome.quint) +
+  guides(fill=FALSE)+
+  ggtitle("grouped by net income per capita")
+ 
+p2<-ggplot(df_family, aes(x = purchase_house, y = as.numeric(fincome1),fill=perNIncome.quint))  + 
+  geom_boxplot(alpha = 0.8) +
+  scale_y_continuous(name = "net income",limits =c(0,2e05) ) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold")) + 
+  facet_wrap(~perNIncome.quint) +
+  guides(fill=FALSE)+
+  ggtitle("zoomed version")
+ggarrange(p1, p2,ncol = 2, nrow = 1)
+
+```
+
+Households with higher per capita incomes also have higher net incomes. When the per capita income level is fixed, the homebuyer has a higher net household income, which indicates that the homebuyer has more family members.
+
+### how family structure factor influnces purchasing house
+
+We choose marriage, family size and minor children as object factors related to family structure.
+```{r,warning=FALSE}
+# generate marriage indicator.
+attr(df_family$tb3_a18_p,"labels")
+df_family$marriage <- ifelse(df_family$tb3_a18_p ==1, 0, 1) #same as purchasing house, need to consider NA case
+
+table(df_family$familysize18)
+sum(df_family$familysize18>8)
+#pmax(df_family$familysize18,9)
+
+size_marriage <- df_family %>% group_by(familysize18,marriage) %>% mutate(purchase_rate = mean(purchase_house),na.rm = TRUE)
+p3<-ggplot(size_marriage,aes(x=(familysize18),y=purchase_rate,group=factor(marriage),color=factor(marriage)))+
+  geom_point()+
+  geom_line()+
+  scale_x_continuous(limits = c(1,8))+
+  ggtitle("marriage influence")+
+  theme(legend.position = "bottom")
+
+size_child <- df_family %>% group_by(familysize18,children_less18) %>% mutate(purchase_rate = mean(purchase_house),na.rm = TRUE)
+  p4<-ggplot(size_child,aes(x=(familysize18),y=purchase_rate,group=factor(children_less18),color=factor(children_less18)))+
+  geom_point()+
+  geom_line()+
+  scale_x_continuous(limits = c(1,8))+
+  ggtitle("minor children influence")+
+  theme(legend.position = "bottom")
+
+
+ggarrange(p3,p4,nrow = 1,ncol=2)
+```
+
+Single-person households have a low purchase rate. Note that no minor children group has higher purchasing rate, the factor behind is the age of the respodent of the family. Also construct the respondent age variable. 
+
+```{r}
+df_family<-filter(df_family,tb1y_a_p>0)
+df_family<- mutate(df_family,age_household=2018-tb1y_a_p)
+ggplot(df_family,aes(x=age_household,fill=children_less18))+
+  geom_density(alpha=0.5)
+
+age_child <- df_family %>% group_by(age_household,children_less18) %>% mutate(purchase_rate = mean(purchase_house),na.rm = TRUE)
+  ggplot(age_child,aes(x=age_household,y=purchase_rate,group=factor(children_less18),color=factor(children_less18)))+
+  geom_point()+
+  geom_line()+
+  scale_x_continuous(limits = c(16,90))+
+  geom_smooth()+
+  ggtitle("minor children and household age influence")+
+  theme(legend.position = "bottom")
+```
+
+We finally show the relatonship between income and famliy size grouped by purchasing house or not.
+
+```{r}
+ggplot(df_family,aes(x=familysize18,y=fincome1,group=purchase_house,color=factor(purchase_house)))+
+  geom_point(alpha = 0.5)+
+  scale_y_continuous(limits = c(0,5e5),name="net income")+
+  facet_wrap(~purchase_house)
+```
+
+
+### location fators
+
+First to see the distribution of surveyed households by province.
+```{r}
+attr(df_family$provcd18,"labels")
+table(df_family$provcd18)
+```
+According to the economic and social development of different regions and the strategic layout of future development, my country is divided into four major economic regions: eastern, western, central and northeastern.[2]
+```{r}
+label_prov<- function(x){
+  if(x %in% c(11,12,13,31,32,33,35,37,44,46)){
+    return("eastern")
+  }
+  if(x %in% c(14,34,36,41,42,43)){
+    return("central")
+  }
+  if(x %in% c(21,22,23)){
+    return("northeastern")
+  }
+  else{return("western")}
+}
+df_family<- mutate(df_family, prov_label= sapply(provcd18,label_prov))
+table(df_family$prov_label)
+
+```
+Draw pictures about the location factors, income factors and whether or not purchasing a house.
+
+```{r}
+ggplot(df_family,aes(x=factor(prov_label),y=fincome1,group_by(factor(purchase_house))))+
+  geom_violin(aes(fill=factor(purchase_house)),draw_quantiles=c(0.25,0.5,0.75))+
+  scale_y_continuous(limits = c(-1e2,3e5))+
+  xlab("location")+
+  ylab("Net Family Income")
+```
+On the whole, the economic level is the highest in the east and the lowest in the west, and there is no significant difference between the buyers and the non-buyers. The central and northeastern regions where the economic level is in the middle are significantly different between the two groups.
+## Furture plan
+We consider to gennerate potential outcome model to mutiple treatments. The parameter $\beta$ characterizes the average causal effect of multiple exposures on outcomes. In the presence of confounding factors, the instrumental variable method is a common approach, where the major challange is to identify enough valid instrumental variables.
+
+$$
+Y_{i}^{\left(\mathbf d^{\prime}, \mathbf{z}^{\prime}\right)}-Y_{i}^{(\mathbf d, \mathbf{z})}=\left(\mathbf{z}^{\prime}-\mathbf{z}\right)^{\top} \boldsymbol{\kappa}^{*}+\left(\mathbf d^{\prime}-\mathbf d\right) \boldsymbol\beta^{*}, \quad \mathbf{E}\left(Y_{i}^{(0,0)} \mid \mathbf{Z}_{i .}, \mathbf{X}_{i .}\right)=\mathbf{Z}_{i .}^{\top} \boldsymbol{\eta}^{*}+\mathbf{X}_{i .}^{\top} \boldsymbol{\phi}^{*}.
+$$
+## Refference
+
+[1] 黄雄. 中国城市家庭住房消费偏好及趋势研究.《调研世界》,2018. DOI: 10.13778/j.cnki.11-3705/c.2018.05.008.
+
+[2] “中国经济社会综合发展指数科学”研究会. 《2020年31省份经济社会综合发展指数评价比对报告》, 2021.
