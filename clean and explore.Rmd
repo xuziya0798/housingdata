@@ -37,7 +37,7 @@ library(ggplot2)
 library(ggpubr)
 
 # read original data
-prefix <- "e:/rmu_study/project/mv2STH_PROJ/data/"
+prefix <- "e:/rmu_study/project/housingdata/"
 
 cfps_famconf <- read_dta(paste0(prefix, "ecfps2018famconf_202008.dta"))
 cfps_famecon <- read_dta(paste0(prefix, "ecfps2018famecon_202101.dta"))
@@ -126,7 +126,17 @@ sum(df_family$resp1pid %in% cfps_famconf$pid)  # pid:"Personal ID"
 df_family <- df_family[df_family$resp1pid %in% cfps_famconf$pid,]
 
 # add the information of the Respondent of family's economy
-cfps_famconf_temp <- cfps_famconf[,c("pid","tb1y_a_p","tb2_a_p","tb3_a18_p","tb4_a18_p","hukou_a18_p","tb4_a18_f","tb4_a18_m","tb4_a18_s")] %>% rename(resp1pid=pid)
+cfps_famconf_temp <- cfps_famconf[,c("pid","tb1y_a_p","tb2_a_p","tb3_a18_p","tb4_a18_p","hukou_a18_p","tb4_a18_f","tb4_a18_m","tb4_a18_s")] %>% 
+  rename(resp1pid=pid,
+         age_head=tb1y_a_p,
+         gender_head=tb2_a_p,
+         marriage_head=tb3_a18_p,
+         education_head=tb4_a18_p,
+         hukou_head=hukou_a18_p,
+         father_edu_head=tb4_a18_f,
+         mother_edu_head=tb4_a18_m,
+         spouse_edu_head=tb4_a18_s
+         )
 df_family <- merge(df_family,cfps_famconf_temp,by="resp1pid")
 ```
 
@@ -143,6 +153,8 @@ unlist_label_df <- lapply(df_family, function(x) attr(x, "label")) %>% glimpse()
 
 # Show sample size
 nrow(df_family)
+
+saveRDS(df_family, "e:/rmu_study/project/housingdata/CFPS.rds")
 ```
 
 ## Exploratory Data Analysis
@@ -218,8 +230,8 @@ Households with higher per capita incomes also have higher net incomes. When the
 We choose marriage, family size and minor children as object factors related to family structure.
 ```{r,warning=FALSE}
 # generate marriage indicator.
-attr(df_family$tb3_a18_p,"labels")
-df_family$marriage <- ifelse(df_family$tb3_a18_p ==1, 0, 1) #same as purchasing house, need to consider NA case
+attr(df_family$marriage_head,"labels")
+df_family$marriage <- ifelse(df_family$marriage_head ==1, 0, 1) #same as purchasing house, need to consider NA case
 
 table(df_family$familysize18)
 sum(df_family$familysize18>8)
