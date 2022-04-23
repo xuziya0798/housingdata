@@ -139,15 +139,19 @@ summary(glm1.reduce)
 
 
 ## 2SCML
-Dhat=housing_data[,1+1:q]
+df=apply(housing_data, 2, as.numeric)
+colnames(df)=names(housing_data)
 
-for (i in 1:q) {
-  drop=1+1:q
-  formula=write_formula(housing_data[-c(1,drop[-i])])
-  stage1 = lm(formula,housing_data)
-  print(summary(stage1))
-  Dhat[,i]=stage1$fitted.values
-}
+stage1=lm.fit(df[,-(1:(q+1))],df[,1+ 1:q])
+Dhat=stage1$fitted.values
+
+# for (i in 1:q) {
+#   drop=1+1:q
+#   formula=write_formula(housing_data[-c(1,drop[-i])])
+#   stage1 = lm(formula,housing_data)
+#   print(summary(stage1))
+#   Dhat[,i]=stage1$fitted.values
+# }
 
 Vhat <- housing_data[,1+1:q]-Dhat
 colnames(Vhat)=c("income_v","marriage_v","education_v","children_v")
@@ -155,23 +159,28 @@ housing_Vhat=cbind(housing_data,Vhat)
 formula_2scml=write_formula(housing_Vhat[,-(1+q+ 1:pz)])
 stage2 <- glm(formula_2scml, family=binomial(link=probit),housing_Vhat)
 summary(stage2)
-df=(apply(housing_data, 2, as.numeric))
-colnames(df)=names(housing_data)
 
 
 ## mvHTP
 mvHTP_01(Y=as.matrix(df[,1]),D=df[,1+1:q],
          Z=df[,1+q+ 1:pz],X=df[,1+q+pz+1:px],s=5,tuning = 5)
-set=mvHTP.Vhat(Y=as.matrix(df[,1]),D=df[,1+1:q],W=df[,-(1+(q+1))],intercept=TRUE,pz=pz,s=5,tuning = 5)
-Zs=Z[,set$Shat]
-  W=cbind(Zs,X)
-  X_=cbind(D,Zs[,-set$Vhat],X)
-  auxreg <-lm.fit(W, D)
+set=mvHTP.Vhat(Y=as.matrix(df[,1]),D=df[,1+1:q],W=df[,1+q+ 1:(pz+px)],intercept=TRUE,pz=pz,s=5,tuning = 5)
+colnames(df[,1+q+set$Vhat])
+colnames(df[,1+q+set$Shat])
+
+
+
+
+Zs=df[,1+q+set$Shat]
+W=cbind(Zs,df[,1+q+pz+ 1:px])
+  auxreg <-lm.fit(W, df[,1+1:q])
  Dhat = as.matrix(auxreg$fitted.values)
-res=data.frame( D-Dhat)
+res=data.frame(df[,1+1:q] -Dhat)
 colnames(res)=c("income_v","marriage_v","education_v","children_v")
 candidates=1+q+1:pz
-drop=union(candidates[-Shat],candidates[Vhat])
+colnames(df[,1+q+set$Vhat])
+drop=union(candidates[-set$Shat],candidates[set$Vhat])
+#drop=candidates[-set$Vhat]
 housing_res=cbind(df[,-drop],res)
 formula_invalid = write_formula(housing_res)
 fit=glm(formula_invalid,family = binomial(link = "probit"),housing_res)
