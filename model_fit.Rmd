@@ -19,6 +19,7 @@ library(haven)
 library(dplyr)
 library(visdat)
 library(ggplot2)
+library(ggcorrplot)
 
 source('E:/rmu_study/project/housingdata/generatedata.R')
 source('E:/rmu_study/project/housingdata/HTP.R')
@@ -34,6 +35,23 @@ We clean the CFPS database in order to generate a dataset with binary Y, a few e
 # read data
 data <- readRDS('E:/rmu_study/project/housingdata/CFPS.rds')
 
+## Add variable to group
+label_prov<- function(x){
+  if(x %in% c(11,12,13,31,32,33,35,37,44,46)){
+    return(4)
+  }
+  if(x %in% c(14,34,36,41,42,43)){
+    return(3)
+  }
+  if(x %in% c(21,22,23)){
+    return(2)
+  }
+  else{return(1)}
+}
+data<- mutate(data, prov_label= sapply(provcd18,label_prov))
+table(data$prov_label)
+
+
 
 # the negative values correspondence applies to all the variables in this dataset
 # -1 = unknown, -2 = deny to answer, -8 = not available, -9 = missing, -10 = unable to determine
@@ -44,13 +62,11 @@ own_house <- data$purchase_house
 
 ### endogenous variable D
 
-# marriage of the head of the household:
-# 0 = no data, 1 = unmarried, 2 = married, 3 = cohabit， 4 = divorce, 5 = widowed
-data$marriage_head <- ifelse(data$marriage_head ==1, 0, 1)
+
 # education of the head of the household
 # 1 = iliteracy, 2 = primary school, 3 = middle school, 4 = high school, 5 = college, 6 = bachelor's, 7 = master's, 8 = doctoral
-
-D=select(data,c(fincome1_per,marriage_head,education_head,children_less18))%>% rename(income=fincome1_per) #family income per person
+# gender of the head of the household: 0 = female, 1 = male
+D=select(data,c(fincome1_per,gender_head,education_head))%>% rename(income=fincome1_per) #family income per person
 apply((D<0)+is.na(D), 2, mean)
 
 
@@ -59,7 +75,7 @@ apply((D<0)+is.na(D), 2, mean)
 # education level of the father, mother, and spouse of the head of the household:
 # 1 = illiteracy, 2 = primary school, 3 = middle school, 4 = high school, 5 = college, 6 = bachelor's, 7 = master's, 8 = doctoral
 
-Z <- select(data,c(father_edu_head,mother_edu_head,spouse_edu_head,
+Z <- select(data,c(father_edu_head,mother_edu_head,spouse_edu_head,prov_label, familysize18,age_head,
                    fs8,fa3,fa5,fp301,fp401,fp405,fp406,fu201,fp502,fp503,fp501,fp509,
                    fp512,fp513,fs6v)) %>% 
   rename(book=fs8, # number of books at home
@@ -67,7 +83,7 @@ Z <- select(data,c(father_edu_head,mother_edu_head,spouse_edu_head,
         # 1 = rivers and lakes, 2 = well water, 3 = tap water, 4 = bottled/purified/filtered water
         # 5 = rainwater, 6 = cellar water, 7 = pond water/mountain spring, 77 = other
          air_purification=fa5, # indoor air purification: 1 = yes, 5 = no, 79 = not available
-         dining=fp301, # monthly telecommunication fee
+         dining=fp301, # monthly dining fee
          telecommunication=fp401, # monthly telecommunication fee
          transport=fp405,# monthly local transport costs
          commodity=fp406,# monthly commodity expenses
@@ -90,23 +106,44 @@ Z[Z %in% c(-1,-2,-10)]=-1 #treat unkown and refuse to answer case as the lowest 
 
 ### other covariates X
 
-X=select(data,c(age_head,gender_head,hukou_head))
-# gender of the head of the household: 0 = female, 1 = male
+# marriage of the head of the household:
+# 0 = no data, 1 = unmarried, 2 = married, 3 = cohabit， 4 = divorce, 5 = widowed
+data$marriage_head <- ifelse(data$marriage_head ==1, 0, 1)
+X=select(data,marriage_head)
+#X=NULL
+
 # registered residence type of the head of the household:
 # 1 = rural, 3 = non-rural, 5 = not registed, 79 = not available (not Chinese citizen)
-table(X$hukou_head)
+#table(X$hukou_head)
 
-apply((X<0)+is.na(X), 2, mean)
+#apply((X<0)+is.na(X), 2, mean)
 # age of the head of the household
 
 # deal with the outliers
 Z$air_purification[Z$air_purification==79] = NA
-X$hukou_head[X$hukou_head %in% c(5,79)] = NA
+#Z$hukou_head[Z$hukou_head %in% c(5,79)] = NA
 
 housing_data <- cbind(own_house,D,Z,X)
 housing_data<- housing_data[complete.cases(housing_data),]
 dim(housing_data)
 
+```
+
+## EDA
+```{r}
+ggplot(housing_data,aes(x=factor(education_head),y=income,group_by(factor(gender_head))))+
+  geom_boxplot(aes(fill=factor(gender_head)))+
+  scale_y_continuous(limits = c(-1e2,2e5))+
+  xlab("education level")+
+  ylab("Net Income per capita")
+
+housing_data %>%    group_by(gender_head) %>% summarize(own_rate = mean(own_house),count=n(),na.rm = TRUE)
+
+housing_data %>%    group_by(education_head) %>% summarize(own_rate = mean(own_house),count=n(),na.rm = TRUE)
+
+
+cormat <- cor(housing_data)
+ggcorrplot(cormat, type = "upper", lab = TRUE, lab_size = 2, method = "circle")
 ```
 
 ## simple test
@@ -129,13 +166,17 @@ write_formula <- function(data){
 }
 
 ## naive probit regression
-formula1=write_formula(housing_data)
-glm1.full=glm(formula1,family=binomial(link=probit),data=housing_data) 
-summary(glm1.full)
+# formula1=write_formula(housing_data)
+# glm1.full=glm(formula1,family=binomial(link=probit),data=housing_data) 
+# summary(glm1.full)
 
 formula2=write_formula(housing_data[,-(1+q+ 1:pz)])
 glm1.reduce = glm(formula2,family=binomial(link=probit),data=housing_data) 
 summary(glm1.reduce)
+
+```
+
+```{r}
 
 
 ## 2SCML
@@ -152,18 +193,22 @@ Dhat=stage1$fitted.values
 #   print(summary(stage1))
 #   Dhat[,i]=stage1$fitted.values
 # }
-
 Vhat <- housing_data[,1+1:q]-Dhat
-colnames(Vhat)=c("income_v","marriage_v","education_v","children_v")
+colnames(Vhat)=c("income_v","gender_v","education_v")
 housing_Vhat=cbind(housing_data,Vhat)
 formula_2scml=write_formula(housing_Vhat[,-(1+q+ 1:pz)])
 stage2 <- glm(formula_2scml, family=binomial(link=probit),housing_Vhat)
 summary(stage2)
 
+```
+
+```{r}
+
+
 
 ## mvHTP
-mvHTP_01(Y=as.matrix(df[,1]),D=df[,1+1:q],
-         Z=df[,1+q+ 1:pz],X=df[,1+q+pz+1:px],s=5,tuning = 5)
+mvHTP_01(Y=as.matrix(df[,1]),D=as.matrix(df[,1+1:q]),
+         Z=as.matrix(df[,1+q+ 1:pz]),X=as.matrix(df[,1+q+pz+1:px]),s=8,tuning = 3)
 set=mvHTP.Vhat(Y=as.matrix(df[,1]),D=df[,1+1:q],W=df[,1+q+ 1:(pz+px)],intercept=TRUE,pz=pz,s=5,tuning = 5)
 colnames(df[,1+q+set$Vhat])
 colnames(df[,1+q+set$Shat])
@@ -176,12 +221,50 @@ W=cbind(Zs,df[,1+q+pz+ 1:px])
   auxreg <-lm.fit(W, df[,1+1:q])
  Dhat = as.matrix(auxreg$fitted.values)
 res=data.frame(df[,1+1:q] -Dhat)
-colnames(res)=c("income_v","marriage_v","education_v","children_v")
+colnames(res)=c("income_v","gender_v","education_v")
 candidates=1+q+1:pz
 colnames(df[,1+q+set$Vhat])
 drop=union(candidates[-set$Shat],candidates[set$Vhat])
 #drop=candidates[-set$Vhat]
 housing_res=cbind(df[,-drop],res)
+formula_invalid = write_formula(housing_res)
+fit=glm(formula_invalid,family = binomial(link = "probit"),housing_res)
+summary(fit)
+
+```
+
+```{r}
+names(Z[,set$Shat])
+names(Z[,set$Vhat])
+
+
+```
+
+```{r}
+df4n = filter(housing_data, housing_data$prov_label==4)
+df4=apply(df4, 2, as.numeric)
+colnames(df4)=names(df4n)
+
+mvHTP_01(Y=as.matrix(df4[,1]),D=as.matrix(df4[,1+1:q]),
+         Z=as.matrix(df4[,1+q+ 1:pz]),X=as.matrix(df4[,1+q+pz+1:px]),s=5,tuning = 5)
+set=mvHTP.Vhat(Y=as.matrix(df4[,1]),D=df4[,1+1:q],W=df4[,1+q+ 1:(pz+px)],intercept=TRUE,pz=pz,s=5,tuning = 5)
+colnames(df4[,1+q+set$Vhat])
+colnames(df4[,1+q+set$Shat])
+
+
+
+
+Zs=df4[,1+q+set$Shat]
+W=cbind(Zs,df4[,1+q+pz+ 1:px])
+  auxreg <-lm.fit(W, df4[,1+1:q])
+ Dhat = as.matrix(auxreg$fitted.values)
+res=data.frame(df4[,1+1:q] -Dhat)
+colnames(res)=c("income_v","gender_v","education_v")
+candidates=1+q+1:pz
+colnames(df4[,1+q+set$Vhat])
+drop=union(candidates[-set$Shat],candidates[set$Vhat])
+#drop=candidates[-set$Vhat]
+housing_res=cbind(df4[,-drop],res)
 formula_invalid = write_formula(housing_res)
 fit=glm(formula_invalid,family = binomial(link = "probit"),housing_res)
 summary(fit)
