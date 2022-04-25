@@ -75,7 +75,7 @@ apply((D<0)+is.na(D), 2, mean)
 # education level of the father, mother, and spouse of the head of the household:
 # 1 = illiteracy, 2 = primary school, 3 = middle school, 4 = high school, 5 = college, 6 = bachelor's, 7 = master's, 8 = doctoral
 
-Z <- select(data,c(father_edu_head,mother_edu_head,spouse_edu_head,prov_label, familysize18,age_head,
+Z <- select(data,c(father_edu_head,mother_edu_head,spouse_edu_head,prov_label, familysize18,age_head,hukou_head,
                    fs8,fa3,fa5,fp301,fp401,fp405,fp406,fu201,fp502,fp503,fp501,fp509,
                    fp512,fp513,fs6v)) %>% 
   rename(book=fs8, # number of books at home
@@ -121,7 +121,7 @@ X=select(data,marriage_head)
 
 # deal with the outliers
 Z$air_purification[Z$air_purification==79] = NA
-#Z$hukou_head[Z$hukou_head %in% c(5,79)] = NA
+Z$hukou_head[Z$hukou_head %in% c(5,79)] = NA
 
 housing_data <- cbind(own_house,D,Z,X)
 housing_data<- housing_data[complete.cases(housing_data),]
@@ -169,7 +169,9 @@ write_formula <- function(data){
 # formula1=write_formula(housing_data)
 # glm1.full=glm(formula1,family=binomial(link=probit),data=housing_data) 
 # summary(glm1.full)
+```
 
+```{r}
 formula2=write_formula(housing_data[,-(1+q+ 1:pz)])
 glm1.reduce = glm(formula2,family=binomial(link=probit),data=housing_data) 
 summary(glm1.reduce)
@@ -208,8 +210,8 @@ summary(stage2)
 
 ## mvHTP
 mvHTP_01(Y=as.matrix(df[,1]),D=as.matrix(df[,1+1:q]),
-         Z=as.matrix(df[,1+q+ 1:pz]),X=as.matrix(df[,1+q+pz+1:px]),s=8,tuning = 3)
-set=mvHTP.Vhat(Y=as.matrix(df[,1]),D=df[,1+1:q],W=df[,1+q+ 1:(pz+px)],intercept=TRUE,pz=pz,s=5,tuning = 5)
+         Z=as.matrix(df[,1+q+ 1:pz]),X=as.matrix(df[,1+q+pz+1:px]),s=10,tuning = 3)
+set=mvHTP.Vhat(Y=as.matrix(df[,1]),D=df[,1+1:q],W=df[,1+q+ 1:(pz+px)],intercept=FALSE,pz=pz,s=5,tuning = 5)
 colnames(df[,1+q+set$Vhat])
 colnames(df[,1+q+set$Shat])
 
@@ -242,12 +244,12 @@ names(Z[,set$Vhat])
 
 ```{r}
 df4n = filter(housing_data, housing_data$prov_label==4)
-df4=apply(df4, 2, as.numeric)
+df4=apply(df4n, 2, as.numeric)
 colnames(df4)=names(df4n)
 
-mvHTP_01(Y=as.matrix(df4[,1]),D=as.matrix(df4[,1+1:q]),
-         Z=as.matrix(df4[,1+q+ 1:pz]),X=as.matrix(df4[,1+q+pz+1:px]),s=5,tuning = 5)
-set=mvHTP.Vhat(Y=as.matrix(df4[,1]),D=df4[,1+1:q],W=df4[,1+q+ 1:(pz+px)],intercept=TRUE,pz=pz,s=5,tuning = 5)
+#mvHTP_01(Y=as.matrix(df4[,1]),D=as.matrix(df4[,1+1:q]),
+#         Z=as.matrix(df4[,1+q+ 1:pz]),X=as.matrix(df4[,1+q+pz+1:px]),s=5,tuning = 5)
+set=mvHTP.Vhat(Y=as.matrix(df4[,1]),D=df4[,1+1:q],W=df4[,1+q+ 1:(pz+px)],intercept=FALSE,pz=pz,s=5,tuning = 3)
 colnames(df4[,1+q+set$Vhat])
 colnames(df4[,1+q+set$Shat])
 
