@@ -272,41 +272,39 @@ par(mfrow=c(1,2))
 ```
 
 
+## Extenstion
+Consider grouping data by region and try to figure out the strange trend in test plot.
+
 ```{r}
-# housing_data$residuals <- fit$residuals
-# 
-# summary(housing_data[housing_data$residuals>0,-(1+q+1:pz)])
-# summary(housing_data[housing_data$residuals<0,-(1+q+1:pz)])
-
-
-
-
-
-df3n = filter(housing_data, housing_data$prov_label==4)
-df3=apply(df3n, 2, as.numeric)
-colnames(df3)=colnames(df3n)
+for (i in 1:4){
+  dfi = filter(housing_data, housing_data$prov_label==i)
+dfi=apply(dfi, 2, as.numeric)
+colnames(dfi)=colnames(housing_data)
 
 px=0
-set=mvHTP.Vhat(Y=as.matrix(df3[,1]),D=df3[,1+1:q],W=df3[,1+q+ 1:(pz+px)],intercept=FALSE,pz=pz,s=5,tuning = 3)
+set=mvHTP.Vhat(Y=as.matrix(dfi[,1]),D=dfi[,1+1:q],W=dfi[,1+q+ 1:(pz+px)],intercept=FALSE,pz=pz,s=5,tuning = 3)
 
 
-Zs=df3[,1+q+set$Shat]
-W=cbind(Zs,df3[,1+q+pz+ 1:px])
-  auxreg <-lm.fit(W, df3[,1+1:q])
+Zs=dfi[,1+q+set$Shat]
+W=cbind(Zs,dfi[,1+q+pz+ 1:px])
+  auxreg <-lm.fit(W, dfi[,1+1:q])
  Dhat = as.matrix(auxreg$fitted.values)
-res=data.frame(df3[,1+1:q] -Dhat)
+res=data.frame(dfi[,1+1:q] -Dhat)
 colnames(res)=c("income_v","gender_v","education_v")
 candidates=1+q+1:pz
-colnames(df3[,1+q+set$Vhat])
+colnames(dfi[,1+q+set$Vhat])
 drop=union(candidates[-set$Shat],candidates[set$Vhat])
 #drop=candidates[-set$Vhat]
-housing_res=cbind(df3[,-drop],res)
+housing_res=cbind(dfi[,-drop],res)
 formula_invalid = write_formula(housing_res)
-fit3=glm(formula_invalid,family = binomial(link = "probit"),housing_res)
-summary(fit3)
+fit=glm(formula_invalid,family = binomial(link = "probit"),housing_res)
+summary(fit)
 
 par(mfrow=c(2,2))
-plot(fit3)
+plot(fit)
+
+}
+
 
 
 ```
