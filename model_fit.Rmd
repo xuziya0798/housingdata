@@ -144,9 +144,10 @@ housing_data %>%    group_by(education_head) %>% summarize(own_rate = mean(own_h
 
 cormat <- cor(housing_data)
 ggcorrplot(cormat, type = "upper", lab = TRUE, lab_size = 2, method = "circle")
+guides(scale = "none")
 ```
 
-## simple test
+## regression
 ```{r}
 q=ncol(D)
 px=ncol(X)
@@ -173,8 +174,8 @@ write_formula <- function(data){
 
 ```{r}
 formula2=write_formula(housing_data[,-(1+q+ 1:pz)])
-glm1.reduce = glm(formula2,family=binomial(link=probit),data=housing_data) 
-summary(glm1.reduce)
+glm = glm(formula2,family=binomial(link=probit),data=housing_data) 
+summary(glm)
 
 ```
 
@@ -199,8 +200,8 @@ Vhat <- housing_data[,1+1:q]-Dhat
 colnames(Vhat)=c("income_v","gender_v","education_v")
 housing_Vhat=cbind(housing_data,Vhat)
 formula_2scml=write_formula(housing_Vhat[,-(1+q+ 1:pz)])
-stage2 <- glm(formula_2scml, family=binomial(link=probit),housing_Vhat)
-summary(stage2)
+TSCML <- glm(formula_2scml, family=binomial(link=probit),housing_Vhat)
+summary(TSCML)
 
 ```
 
@@ -209,8 +210,8 @@ summary(stage2)
 
 
 ## mvHTP
-mvHTP_01(Y=as.matrix(df[,1]),D=as.matrix(df[,1+1:q]),
-         Z=as.matrix(df[,1+q+ 1:pz]),X=as.matrix(df[,1+q+pz+1:px]),s=10,tuning = 3)
+#mvHTP_01(Y=as.matrix(df[,1]),D=as.matrix(df[,1+1:q]),
+         #Z=as.matrix(df[,1+q+ 1:pz]),X=as.matrix(df[,1+q+pz+1:px]),s=10,tuning = 3)
 set=mvHTP.Vhat(Y=as.matrix(df[,1]),D=df[,1+1:q],W=df[,1+q+ 1:(pz+px)],intercept=FALSE,pz=pz,s=5,tuning = 5)
 colnames(df[,1+q+set$Vhat])
 colnames(df[,1+q+set$Shat])
@@ -242,33 +243,70 @@ names(Z[,set$Vhat])
 
 ```
 
+## iv test
 ```{r}
-df4n = filter(housing_data, housing_data$prov_label==4)
-df4=apply(df4n, 2, as.numeric)
-colnames(df4)=names(df4n)
+library(ivreg)
+f="own_house~income+gender_head+education_head+familysize18+marriage_head|father_edu_head+mother_edu_head+spouse_edu_head+age_head+hukou_head+book+culture_entertain"
 
-#mvHTP_01(Y=as.matrix(df4[,1]),D=as.matrix(df4[,1+1:q]),
-#         Z=as.matrix(df4[,1+q+ 1:pz]),X=as.matrix(df4[,1+q+pz+1:px]),s=5,tuning = 5)
-set=mvHTP.Vhat(Y=as.matrix(df4[,1]),D=df4[,1+1:q],W=df4[,1+q+ 1:(pz+px)],intercept=FALSE,pz=pz,s=5,tuning = 3)
-colnames(df4[,1+q+set$Vhat])
-colnames(df4[,1+q+set$Shat])
+TestWeak <- ivreg(f,data=housing_data)
+summary(TestWeak)
 
 
 
+```
 
-Zs=df4[,1+q+set$Shat]
-W=cbind(Zs,df4[,1+q+pz+ 1:px])
-  auxreg <-lm.fit(W, df4[,1+1:q])
+## model test
+```{r}
+anova(glm, TSCML, test="Chisq")
+anova( TSCML, fit, test="Chisq")
+
+par(mfrow=c(2,2))
+plot(fit)
+
+par(mfrow=c(1,2))
+ plot(predict(glm, type="response"),
+ residuals(glm, type= "deviance"))
+ plot(predict(TSCML, type="response"),
+ residuals(TSCML, type= "deviance"))
+ 
+```
+
+
+```{r}
+# housing_data$residuals <- fit$residuals
+# 
+# summary(housing_data[housing_data$residuals>0,-(1+q+1:pz)])
+# summary(housing_data[housing_data$residuals<0,-(1+q+1:pz)])
+
+
+
+
+
+df3n = filter(housing_data, housing_data$prov_label==4)
+df3=apply(df3n, 2, as.numeric)
+colnames(df3)=colnames(df3n)
+
+px=0
+set=mvHTP.Vhat(Y=as.matrix(df3[,1]),D=df3[,1+1:q],W=df3[,1+q+ 1:(pz+px)],intercept=FALSE,pz=pz,s=5,tuning = 3)
+
+
+Zs=df3[,1+q+set$Shat]
+W=cbind(Zs,df3[,1+q+pz+ 1:px])
+  auxreg <-lm.fit(W, df3[,1+1:q])
  Dhat = as.matrix(auxreg$fitted.values)
-res=data.frame(df4[,1+1:q] -Dhat)
+res=data.frame(df3[,1+1:q] -Dhat)
 colnames(res)=c("income_v","gender_v","education_v")
 candidates=1+q+1:pz
-colnames(df4[,1+q+set$Vhat])
+colnames(df3[,1+q+set$Vhat])
 drop=union(candidates[-set$Shat],candidates[set$Vhat])
 #drop=candidates[-set$Vhat]
-housing_res=cbind(df4[,-drop],res)
+housing_res=cbind(df3[,-drop],res)
 formula_invalid = write_formula(housing_res)
-fit=glm(formula_invalid,family = binomial(link = "probit"),housing_res)
-summary(fit)
+fit3=glm(formula_invalid,family = binomial(link = "probit"),housing_res)
+summary(fit3)
+
+par(mfrow=c(2,2))
+plot(fit3)
+
 
 ```
